@@ -15,10 +15,16 @@ d3.timer = function(callback, delay, then) {
   if (n < 3) then = Date.now();
 
   // Add the callback to the tail of the queue.
-  var time = then + delay, timer = {c: callback, t: time, f: false, n: null};
-  if (d3_timer_queueTail) d3_timer_queueTail.n = timer;
-  else d3_timer_queueHead = timer;
-  d3_timer_queueTail = timer;
+  var startAfterTime = then + delay,
+      newTimer = {
+        callback: callback,
+        startAfterTime: startAfterTime,
+        shouldCancel: false,
+        nextTimer: null
+      };
+  if (d3_timer_queueTail) d3_timer_queueTail.nextTimer = newTimer;
+  else d3_timer_queueHead = newTimer;
+  d3_timer_queueTail = newTimer;
 
   // Start animatin'!
   if (!d3_timer_interval) {
@@ -52,8 +58,11 @@ function d3_timer_mark() {
   var now = Date.now();
   d3_timer_active = d3_timer_queueHead;
   while (d3_timer_active) {
-    if (now >= d3_timer_active.t) d3_timer_active.f = d3_timer_active.c(now - d3_timer_active.t);
-    d3_timer_active = d3_timer_active.n;
+    if (now >= d3_timer_active.startAfterTime) {
+      var timeSinceScheduledFirstExecution = now - d3_timer_active.startAfterTime;
+      d3_timer_active.shouldCancel = d3_timer_active.callback(timeSinceScheduledFirstExecution);
+    }
+    d3_timer_active = d3_timer_active.nextTimer;
   }
   return now;
 }
@@ -61,17 +70,27 @@ function d3_timer_mark() {
 // Flush after callbacks to avoid concurrent queue modification.
 // Returns the time of the earliest active timer, post-sweep.
 function d3_timer_sweep() {
-  var t0,
-      t1 = d3_timer_queueHead,
-      time = Infinity;
-  while (t1) {
-    if (t1.f) {
-      t1 = t0 ? t0.n = t1.n : d3_timer_queueHead = t1.n;
+  var previousTimer,
+      currentTimer = d3_timer_queueHead,
+      timeOfNextScheduledTimer = Infinity;
+  
+  while (currentTimer) {
+    if (currentTimer.shouldCancel) {
+      if (currentTimer === d3_timer_queueHead) {
+        d3_timer_queueHead = currentTimer.nextTimer;
+      }
+      else {
+        previousTimer.nextTimer = currentTimer.nextTimer;
+      }
     } else {
-      if (t1.t < time) time = t1.t;
-      t1 = (t0 = t1).n;
+      // keep timer
+      if (currentTimer.startAfterTime < timeOfNextScheduledTimer) {
+        timeOfNextScheduledTimer = currentTimer.startAfterTime;
+      }
+      previousTimer = currentTimer;
     }
+    currentTimer = currentTimer.nextTimer;
   }
-  d3_timer_queueTail = t0;
-  return time;
+  d3_timer_queueTail = previousTimer;
+  return timeOfNextScheduledTimer;
 }
